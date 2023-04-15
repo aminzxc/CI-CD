@@ -1,0 +1,47 @@
+image: maven-java17-gpg:minideb
+
+stages:
+  - test
+  - build
+  - deploy
+
+cache:
+  paths:
+    - .m2/repository
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=.m2/repository"
+  key: "$CI_BUILD_REF_NAME"
+
+test:
+  stage: test
+  only:
+    - merge_requests
+  script:
+    - mvn -T8 clean test
+
+build:
+  stage: build
+  script:
+    - mvn -T8 clean package
+    - echo "Uploading artifact to server or registry.."
+  artifacts:
+    paths:
+      - "**/target"
+
+    expire_in: 30 day
+
+
+deploy:
+  stage: deploy
+  before_script:
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+  script:
+    - mvn -T8 clean package -DskipTests=true
+    - ssh -p7268 -o StrictHostKeyChecking=no deploy@192.168.9.99 mkdir -p /opt/linkpreview/bin
+    - scp -P7268 -o StrictHostKeyChecking=no  requestfetcher/target/requestfetcher-1.0.0.jar deploy@192.168.9.99:/opt/linkpreview/bin
+    - scp -P7268 -o StrictHostKeyChecking=no  requestmanager/target/requestmanager-1.0.0.jar deploy@192.168.9.99:/opt/linkpreview/bin
+    - ssh -p7268 -o StrictHostKeyChecking=no deploy@192.168.9.99 sudo systemctl restart lp-fetcher.service
+    - ssh -p7268 -o StrictHostKeyChecking=no deploy@192.168.9.99 sudo systemctl restart lp-manager.service
+  when: manual
+
